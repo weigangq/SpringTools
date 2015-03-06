@@ -1,13 +1,13 @@
 #!/bin/bash
 mkdir results
-perl /home/shared/rrahman/get_random_core.pl -o 100
+perl db-export.pl -o 100
 for file in ./*.fas
 do 
 	fas=$( basename "$file" ".fas")
 	bioseq -t1 $fas.fas | muscle -out $fas.aln -clwstrict
-	/home/shared/rrahman/align_coding_seq.pl $fas.aln $fas.fas > $fas.cds
+	scripts/align_coding_seq.pl $fas.aln $fas.fas > $fas.cds
 done
-/home/shared/rrahman/AlignConcat.V2.pl ./*.cds > alignedconcat.txt
+scripts/AlignConcat.V2.pl ./*.cds > alignedconcat.txt
 
 leng=$(bioaln -i 'fasta' -l alignedconcat.txt)
 echo "DNA, gene1codon1 = 1-$leng\3" >> part.txt
