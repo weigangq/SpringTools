@@ -1,4 +1,4 @@
-#! /bin/bash
+#!/bin/bash
 
 usage="SPRING-Tools Usage:\n****ALL OPTIONS ARE REQUIRED****\n-f [input] <FASTA FILE> \n-n [strain name] \n-i [genome ID] \n" 
 
