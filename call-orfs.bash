@@ -1,39 +1,45 @@
 #! /bin/bash
-usage="\nBefore running please specify path to pipeline, glimmer and blast\n\****ALL OPTIONS ARE REQUIRED****\nUSAGE:\n-f [input] <FASTA FILE> \n-i [icm] \n-o [name] \n-p [GID] \n-r [type] \n-h [get predicted orfs] <0 or 1> \n \n"
 
-while getopts ":i:o:f:p:r:c:n:" opt; do
-    case $opt in 
-	i) i=$OPTARG ;; #icm
-	o) o=$OPTARG ;; #name eg gid_4
+usage="SPRING-Tools Usage:\n****ALL OPTIONS ARE REQUIRED****\n-f [input] <FASTA FILE> \n-n [strain name] \n-i [genome ID] \n" 
+
+while getopts ":i:f:n:h" opt; do
+  case $opt in 
+	h) printf "$usage" ; exit ;;
 	f) f=$OPTARG ;; #fasta
-	p) p=$OPTARG ;; #gid eg 1,2,3,4
-	r) r=$OPTARG ;; #type
-	c) c=$OPTARG ;;
-	n) n=$OPTARG ;; #name eg DK
+	p) i=$OPTARG ;; #gid eg 1,2,3,4
+	n) n=$OPTARG ;; #strain name eg DK
+	\?) echo "Invalid option: -$OPTARG" >&2 ; printf "$usage" ; exit ;;
 	esac 
 done 
 
+if [[ $f && ${f} ]] || [[ $i && ${i} ]]|| [[ $n && ${n} ]]
+then
+    printf "Running SPRINGDB pipeline for $f with gid $i and strain name $n\n"
+else
+    printf "$usage"
+    exit
+fi
 
-glimmer long-orfs -n -t 1.15 -l $f $o.longorfs 
-glimmer extract -t $f $o.longorfs > $o.train
-glimmer build-icm -r $o.icm < $o.train
-glimmer glimmer3 -o 10 -t 30 -g 300 -l $f $o.icm $o
-glimmer extract -w $f $o.predict > $o.fas
-cat $o.fas | sed -E 's/^>(\S+)\s+(\S+)\s+(\S+)\s+(\S+)/>\1|'$n'_'$p'|gid_'$p'|\2|\3/' > $o.fas2
-head $o.fas2 
-~/dnatwizzer-code/biocode -t $o.fas2 > $o.pep
+glimmer long-orfs -n -t 1.15 -l $f gid_$i.longorfs 
+glimmer extract -t $f gid_$i.longorfs > gid_$i.train
+glimmer build-icm -r gid_$i.icm < gid_$i.train
+glimmer glimmer3 -o 10 -t 30 -g 300 -l $f gid_$i.icm gid_$i
+glimmer extract -w $f gid_$i.predict > gid_$i.fas
+cat gid_$i.fas | sed -E 's/^>(\S+)\s+(\S+)\s+(\S+)\s+(\S+)/>\1|'$n'_'$i'|gid_'$i'|\2|\3/' > gid_$i.fas2
+head gid_$i.fas2 
+~/dnatwizzer-code/biocode -t gid_$i.fas2 > gid_$i.pep
 
-makeblastdb -in $o.pep -dbtype 'prot' -out $o 
+makeblastdb -in gid_$i.pep -dbtype 'prot' -out gid_$i 
 
 printf "Forward Blasting \n" ;
-blastp -query $o.pep -db /home/shared/rrahman/feb_2015/springdb/gid_1/gid_1 -outfmt "6 qseqid sseqid pident length qlen evalue" -evalue 1e-5 -out $o.fwd
+blastp -query gid_$i.pep -db /home/shared/rrahman/feb_2015/springdb/gid_1/gid_1 -outfmt "6 qseqid sseqid pident length qlen evalue" -evalue 1e-5 -out gid_$i.fwd
 
 printf "Reverse Blasting \n" ;
 
-blastp -query /home/shared/rrahman/feb_2015/springdb/gid_1/gid_1.orth_id_for_blasting -db $o -outfmt "6 qseqid sseqid pident length qlen evalue" -evalue 1e-5 -out $o.rev
+blastp -query /home/shared/rrahman/feb_2015/springdb/gid_1/gid_1.orth_id_for_blasting -db gid_$i -outfmt "6 qseqid sseqid pident length qlen evalue" -evalue 1e-5 -out gid_$i.rev
 
-perl /home/shared/rrahman/check-reciprocal-with-options.pl $o.fwd $o.rev > $o.orth 2> $o.no_orth
+perl /scripts/check-reciprocal-with-options.pl gid_$i.fwd gid_$i.rev > gid_$i.orth 2> gid_$i.no_orth
 
-perl /home/shared/rliang/scripts/Parsers/update_orth_with_reciprocol_top_hits.pl $o.orth  > $o.tophits 
-perl /home/shared/rliang/scripts/Parsers/parse_predict_orf.pl $o.fas2 > $o.txt 
+perl /scripts/update_orth_with_reciprocol_top_hits.pl gid_$i.orth  > gid_$i.tophits 
+perl /scripts/parse_predict_orf.pl gid_$i.fas2 > gid_$i.txt 
 
