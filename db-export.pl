@@ -1,14 +1,17 @@
 #!/usr/bin/perl
-
 use strict;
 use warnings;
 use DBI;
 use Getopt::Long qw(:config gnu_getopt);
 use Pod::Usage;
 
+
 my %opts;
 GetOptions(
     \%opts,
+	"family_type=s",
+	"outfile_type=s",
+	"number_core_orth=i",
     "help|h",
     "man|m",
     "exclude_genome|G=s",
@@ -16,10 +19,104 @@ GetOptions(
     "genome|g=s",
     "annot|a=s"
     ) or pod2usage(2);
+
 pod2usage(1) if $opts{"help"};
 pod2usage( -exitstatus => 0, -verbose => 2) if $opts{"man"};
 
-my $dbh = DBI->connect("dbi:Pg:dbname=paerug;host=borreliabase.org", "lab", "homology", {RaiseError => 1, AutoCommit => 1}) || die "Could not connect to database.";
+my $family_type = $opts{"family_type"}; 
+my $outfile_type = $opts{"outfile_type"}; 
+
+die "SPRING-UTILS requires --family_type and outfile_type defined\n"  unless defined $opts{"family_type"}  and defined $opts{"outfile_type"} ;
+die "Invalid family type" unless $family_type =~ m/orth/i or $family_type =~ m/cdhit/i ; 
+die "Invalid outfile type" unless $outfile_type =~ m/fasta/i or $outfile_type =~ m/matrix/i ; 
+
+my $dbh = DBI->connect(('dbi:Pg:dbname=pa2;host=borreliabase.org', 'lab', 'homology')
+, {RaiseError => 1, AutoCommit => 1}) || die "Could not connect to database.\n";
+
+
+sub main()
+{
+
+	if ($family_type =~ m/orth/i)  
+	{
+		my $number_core_orth = $opts{"number_core_orth"} || "all"; 
+		my @core = &obtain_core_genome();
+		if ($number_core_orth =~ m/all/i )
+		{
+			my %orth_info = &get_coding_seq(@core); 
+			&printout(%orth_info, $outfile_type);
+		}
+		else 
+		{
+			my @randomized_orths = &randomized_orth_orfs(@core, $number_core_orth);
+			&get_coding_seq(@randomized_orths); 
+			my %orth_info = &get_coding_seq(@randomized_orths); 
+			&printout(%orth_info, $outfile_type);
+		}
+	} 
+	else
+	{
+		print "cdhit stuff here\n";
+	}
+
+}
+
+main(); 
+
+
+
+####Subroutines and Functions####
+
+sub obtain_core_genome()
+{
+	my $query_num_genomes = $dbh->prepare('SELECT count(strain_name) from genome');
+	$query_num_genomes->execute(); 
+	my @num_genomes =  $query_num_genomes->fetchrow_array();
+	my $query = $dbh->prepare('SELECT orth_id from orth_fam group by orth_id having count(orth_id) = ?');
+	$query->execute($num_genomes[0]);
+	my @core  ;
+	while (my @data = $query->fetchrow_array())
+	{
+		my $orth_orf_id = $data[0];
+		push (@core, $orth_orf_id);
+	}
+	return (@core); 
+}
+
+&get_coding_seq()
+{
+	my %orth_info ;
+	my @core = shift @_ ; 
+	foreach my $orth_orf_id (@core)
+	{
+		$query = $dbh->prepare('SELECT genome_id, locus_name, seq FROM orth_fam WHERE orth_id=? and seq is not null'); 
+		$query->execute($orth_orf_id);
+		my @orthologs;
+		my $print = 1;
+		while (my @data = $query->fetchrow_array())
+		{
+			last if not defined $data[2]; 
+			my $ortholog =
+			{
+				'genome_id' => $data[0],
+				'locus_tag' => $data[1],
+				'seq' => $data[2]
+			};
+		push(@orthologs, $ortholog);
+      }
+	  $orth_info{$orth_orf_id} = @orthologs ; 
+	}
+	return %orth_info;  
+}
+
+die ;
+
+
+
+
+
+
+#y $dbh = DBI->connect("dbi:Pg:dbname=paerug;host=borreliabase.org", "lab", "homology", {RaiseError => 1, AutoCommit => 1}) || die "Could not connect to database.";
 
 # EXCLUDE GENOME_ID
 #SELECT cdhit_id, genome_id, count(genome_id) FROM orf WHERE exclude != TRUE GROUP BY cdhit_id, genome_id
