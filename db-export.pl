@@ -4,16 +4,20 @@ use warnings;
 use DBI;
 use Getopt::Long qw(:config gnu_getopt);
 use Pod::Usage;
-
+use Data::Dumper;
 
 my %opts;
 GetOptions(
     \%opts,
+	"biopopout|b", 
+	"seq|s",
 	"family_type=s",
 	"outfile_type=s",
 	"number_core_orth=i",
     "help|h",
     "man|m",
+	"core_genome_type=s",
+	"include_genomes=s",
     "exclude_genome|G=s",
     "exclude_annot|A=s",
     "genome|g=s",
@@ -23,12 +27,13 @@ GetOptions(
 pod2usage(1) if $opts{"help"};
 pod2usage( -exitstatus => 0, -verbose => 2) if $opts{"man"};
 
+my $genome_ids = $opts{'include_genomes'} || '1,5,6,7,8,9,10,11,12,13,14,24,25,26,27,28,29,30,31,32,33,35,36,37,39,40,41,42,43,44,45,46,47,48,49,50,51,52,53'; #include specific genomes or all genomes, need to make this dynamic!!!!!!
+my $seqs = $opts{"seq"};
 my $family_type = $opts{"family_type"}; 
 my $outfile_type = $opts{"outfile_type"}; 
+my $core_genome_type = $opts{'core_genome_type'} || "all" ; 
 
-die "SPRING-UTILS requires --family_type and outfile_type defined\n"  unless defined $opts{"family_type"}  and defined $opts{"outfile_type"} ;
-die "Invalid family type" unless $family_type =~ m/orth/i or $family_type =~ m/cdhit/i ; 
-die "Invalid outfile type" unless $outfile_type =~ m/fasta/i or $outfile_type =~ m/matrix/i ; 
+&error_checks();
 
 my $dbh = DBI->connect(('dbi:Pg:dbname=pa2;host=borreliabase.org', 'lab', 'homology')
 , {RaiseError => 1, AutoCommit => 1}) || die "Could not connect to database.\n";
@@ -40,18 +45,20 @@ sub main()
 	if ($family_type =~ m/orth/i)  
 	{
 		my $number_core_orth = $opts{"number_core_orth"} || "all"; 
-		my @core = &obtain_core_genome();
-		if ($number_core_orth =~ m/all/i )
+		my @core = &obtain_core_genome($core_genome_type,$genome_ids);
+		if ($number_core_orth =~ m/all/i ) #get all of core genome 
 		{
-			my %orth_info = &get_coding_seq(@core); 
-			&printout(%orth_info, $outfile_type);
+			my %orth_info = &get_coding_seq(\@core, $genome_ids); 
+			&printout(\%orth_info, $outfile_type);
 		}
-		else 
+		else #get randomized subset of core genome 
 		{
-			my @randomized_orths = &randomized_orth_orfs(@core, $number_core_orth);
-			&get_coding_seq(@randomized_orths); 
-			my %orth_info = &get_coding_seq(@randomized_orths); 
-			&printout(%orth_info, $outfile_type);
+			print "temp\n"; 
+			# my @genome_ids = split ",", $opts{'include_genomes'} || "all"; 
+			# my @randomized_orths = &randomized_orth_orfs(@core, $number_core_orth);
+			# &get_coding_seq(@randomized_orths); 
+			# my %orth_info = &get_coding_seq(@randomized_orths); 
+			# &printout(%orth_info, $outfile_type);
 		}
 	} 
 	else
@@ -67,49 +74,118 @@ main();
 
 ####Subroutines and Functions####
 
-sub obtain_core_genome()
+sub error_checks () 
 {
-	my $query_num_genomes = $dbh->prepare('SELECT count(strain_name) from genome');
-	$query_num_genomes->execute(); 
-	my @num_genomes =  $query_num_genomes->fetchrow_array();
-	my $query = $dbh->prepare('SELECT orth_id from orth_fam group by orth_id having count(orth_id) = ?');
-	$query->execute($num_genomes[0]);
-	my @core  ;
-	while (my @data = $query->fetchrow_array())
-	{
-		my $orth_orf_id = $data[0];
-		push (@core, $orth_orf_id);
-	}
-	return (@core); 
+	die "SPRING-UTILS requires --family_type and --outfile_type defined\n"  unless defined $opts{"family_type"}  and defined $opts{"outfile_type"} ;
+	die "Invalid family type" unless $family_type =~ m/orth/i or $family_type =~ m/cdhit/i ; 
+	die "Invalid outfile type" unless $outfile_type =~ m/fasta/i or $outfile_type =~ m/matrix/i ; 
+	die "Invalid core genome type, either 'all'  or 'relative' " unless $core_genome_type =~ m/all/i or $core_genome_type =~ m/relative/i ; 
+	die "Relative core genome requires --include_genomes or --exclude_genomes defined " if $core_genome_type =~ m/relative/i and not defined $opts{'include_genomes'} or $opts{'exclude_genomes'} ;
 }
 
-&get_coding_seq()
+sub obtain_core_genome()
 {
-	my %orth_info ;
-	my @core = shift @_ ; 
-	foreach my $orth_orf_id (@core)
+	my $core_genome_type = shift @_ ;
+	my $genome_ids = shift @_; 
+	if ($core_genome_type =~ m/all/i) 
 	{
-		$query = $dbh->prepare('SELECT genome_id, locus_name, seq FROM orth_fam WHERE orth_id=? and seq is not null'); 
-		$query->execute($orth_orf_id);
-		my @orthologs;
-		my $print = 1;
+		my $query_num_genomes = $dbh->prepare('SELECT count(strain_name) from genome');
+		$query_num_genomes->execute(); 
+		my @num_genomes =  $query_num_genomes->fetchrow_array();
+		my $query = $dbh->prepare('SELECT orth_id from orth_fam group by orth_id having count(orth_id) = ? ');
+		$query->execute($num_genomes[0]);
+		my @core  ;
 		while (my @data = $query->fetchrow_array())
 		{
-			last if not defined $data[2]; 
-			my $ortholog =
+			my $orth_orf_id = $data[0];
+			push (@core, $orth_orf_id);
+		}
+		return (@core); 
+	}
+	else 
+	{
+		my @core; 
+		my %orth_count ;
+		foreach my $gid (split ",", $genome_ids)
+		{
+			my $query = $dbh->prepare('SELECT orth_id from orth_fam where genome_id = ? order by orth_id limit 10');
+			$query->execute($gid);
+			while (my @data = $query->fetchrow_array())
 			{
-				'genome_id' => $data[0],
-				'locus_tag' => $data[1],
-				'seq' => $data[2]
-			};
-		push(@orthologs, $ortholog);
-      }
-	  $orth_info{$orth_orf_id} = @orthologs ; 
+				$orth_count{$data[0]}++ ; 
+			}
+		}
+		foreach my $orth_id (keys %orth_count)
+		{
+			next if $orth_count{$orth_id} ne scalar (split(",", $genome_ids));
+			push @core, $orth_id; 
+		}
+		return (@core);
+	}
+
+}
+
+sub get_coding_seq()
+{
+	my %orth_info ;
+	my ($ref_core, $genome_ids) = @_; 
+	my @core = @{$ref_core};
+	my @ids = split "," , $genome_ids ;
+	foreach my $orth_orf_id (@core)
+	{
+		warn "getting orth_id $orth_orf_id\n";
+		my @orthologs;
+		my $print = 1;
+		foreach my $gid (@ids)
+		{
+			my $query = $dbh->prepare('SELECT genome_id, locus_name, seq FROM orf WHERE orth_id=? and seq is not null and genome_id = ?' ); 
+			$query->execute($orth_orf_id,$gid);
+			while (my @data = $query->fetchrow_array())
+			{
+				last if not defined $data[2]; 
+				$orth_info{$orth_orf_id}{$data[0]} = 
+				{
+					'genome_id' => $data[0],
+					'locus_tag' => $data[1],
+					'seq' => $data[2]
+				};
+
+			}	
+		}	
+ 
 	}
 	return %orth_info;  
 }
+sub randomized_orth_orfs()
+{
+}
+
+sub printout() 
+{
+	my ($ref_orth_info, $filetype ) = @_ ;
+	my %orth_info = %{$ref_orth_info}; 
+	if ($filetype =~ m/fasta/i)
+	{
+		foreach my $orth_id (keys %orth_info)
+		{
+			open(OUTPUT, ">", "orth_orf_$orth_id.fas");
+			
+			foreach my $gid (keys $orth_info{$orth_id})
+			{
+				print OUTPUT ">gid_", $orth_info{$orth_id}{$gid}->{'genome_id'}, "|" , $orth_info{$orth_id}{$gid}->{'locus_tag'}, "\n", $orth_info{$orth_id}{$gid}->{'seq'}, "\n";
+			}
+			close(OUTPUT);
+		}
+	}
+	else
+	{
+		print "matrix out here\n";
+	}
+}
+
 
 die ;
+
 
 
 
